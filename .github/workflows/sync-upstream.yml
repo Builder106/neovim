@@ -1,0 +1,56 @@
+name: Sync Upstream
+
+on:
+  schedule:
+    - cron: '0 3 * * *'  # Daily at 3 AM UTC
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    name: Sync with upstream neovim/neovim
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout fork
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Add upstream remote
+        run: git remote add upstream https://github.com/neovim/neovim.git
+
+      - name: Fetch upstream
+        run: git fetch upstream master
+
+      - name: Check if sync needed
+        id: check
+        run: |
+          LOCAL=$(git rev-parse HEAD)
+          UPSTREAM=$(git rev-parse upstream/master)
+          if [ "$LOCAL" = "$UPSTREAM" ]; then
+            echo "already_synced=true" >> $GITHUB_OUTPUT
+            echo "Fork is already up to date with upstream"
+          else
+            echo "already_synced=false" >> $GITHUB_OUTPUT
+            echo "Fork is behind upstream by $(git rev-list --count HEAD..upstream/master) commits"
+          fi
+
+      - name: Merge upstream
+        if: steps.check.outputs.already_synced == 'false'
+        run: |
+          git merge upstream/master --no-edit --ff-only || {
+            echo "::warning::Fast-forward failed, attempting merge with strategy"
+            git merge upstream/master --no-edit -X ours
+          }
+
+      - name: Push to fork
+        if: steps.check.outputs.already_synced == 'false'
+        run: git push origin master
